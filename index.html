@@ -1,0 +1,502 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>模型结果自动评测工具</title>
+  <style>
+    :root {
+      --bg: #f6f7f9;
+      --panel: #ffffff;
+      --text: #18202b;
+      --muted: #5f6b7a;
+      --line: #d9dee7;
+      --accent: #1769e0;
+      --accent-soft: #eaf2ff;
+      --ok: #17803d;
+      --warn: #b56200;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: var(--text);
+      background: var(--bg);
+    }
+    header {
+      padding: 22px 28px 14px;
+      border-bottom: 1px solid var(--line);
+      background: var(--panel);
+    }
+    h1 {
+      margin: 0 0 6px;
+      font-size: 22px;
+      font-weight: 700;
+      letter-spacing: 0;
+    }
+    header p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+    }
+    main {
+      display: grid;
+      grid-template-columns: 340px 1fr;
+      gap: 18px;
+      padding: 18px;
+      max-width: 1440px;
+      margin: 0 auto;
+    }
+    aside, section {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+    aside {
+      padding: 16px;
+      height: fit-content;
+    }
+    section {
+      min-width: 0;
+      overflow: hidden;
+    }
+    .field { margin-bottom: 14px; }
+    label {
+      display: block;
+      margin-bottom: 6px;
+      font-size: 13px;
+      font-weight: 650;
+    }
+    input[type="file"], input[type="text"], select {
+      width: 100%;
+      min-height: 36px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 7px 9px;
+      background: #fff;
+      color: var(--text);
+      font-size: 14px;
+    }
+    .radio-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+    .radio-row label {
+      display: flex;
+      gap: 7px;
+      align-items: center;
+      margin: 0;
+      padding: 8px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      font-weight: 500;
+      color: var(--muted);
+    }
+    button {
+      width: 100%;
+      min-height: 38px;
+      border: 0;
+      border-radius: 6px;
+      background: var(--accent);
+      color: #fff;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    button:disabled {
+      cursor: not-allowed;
+      background: #aab3c2;
+    }
+    .hint {
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+    .status {
+      margin-top: 14px;
+      padding: 10px;
+      border-radius: 6px;
+      background: var(--accent-soft);
+      color: #164b91;
+      font-size: 13px;
+      line-height: 1.45;
+      display: none;
+    }
+    .status.error {
+      display: block;
+      background: #fff1ed;
+      color: #9b2f14;
+    }
+    .tabs {
+      display: flex;
+      gap: 8px;
+      padding: 12px;
+      border-bottom: 1px solid var(--line);
+      background: #fbfcfd;
+    }
+    .tab {
+      width: auto;
+      min-height: 32px;
+      padding: 0 12px;
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--muted);
+      font-weight: 650;
+    }
+    .tab.active {
+      border-color: var(--accent);
+      background: var(--accent-soft);
+      color: var(--accent);
+    }
+    .content { padding: 14px; }
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(130px, 1fr));
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+    .metric {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 10px 12px;
+      background: #fff;
+    }
+    .metric b {
+      display: block;
+      margin-top: 4px;
+      font-size: 22px;
+    }
+    .metric span {
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .table-wrap {
+      max-height: 620px;
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    th, td {
+      border-bottom: 1px solid var(--line);
+      padding: 8px 10px;
+      text-align: left;
+      vertical-align: top;
+      max-width: 300px;
+      overflow-wrap: anywhere;
+    }
+    th {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      background: #f8fafc;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    .empty {
+      padding: 46px 20px;
+      text-align: center;
+      color: var(--muted);
+    }
+    .download {
+      display: none;
+      margin-top: 12px;
+      text-align: center;
+      text-decoration: none;
+      padding: 10px 12px;
+      border-radius: 6px;
+      background: var(--ok);
+      color: #fff;
+      font-weight: 700;
+    }
+    footer {
+      max-width: 1440px;
+      margin: 0 auto;
+      padding: 0 18px 18px;
+      color: var(--muted);
+      font-size: 12px;
+      text-align: right;
+    }
+    @media (max-width: 920px) {
+      main { grid-template-columns: 1fr; }
+      .metrics { grid-template-columns: repeat(2, minmax(130px, 1fr)); }
+      footer { text-align: left; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>模型结果自动评测工具</h1>
+    <p>面向模型运营的本地化 Excel 评测分析与准召统计工具</p>
+  </header>
+  <main>
+    <aside>
+      <div class="field">
+        <label for="file">评估结果 Excel</label>
+        <input id="file" type="file" accept=".xlsx,.xls">
+        <div class="hint">运行失败导致的空 JSON 会保留原行并标记解析状态。</div>
+      </div>
+      <button id="previewBtn">读取表格</button>
+      <div id="fileInfo" class="status"></div>
+      <div class="field" id="sheetField" style="display:none; margin-top:18px">
+        <label for="sheetName">工作表</label>
+        <select id="sheetName"></select>
+        <div class="hint">切换工作表后会自动重新读取表头和预览。</div>
+      </div>
+
+      <div class="field" style="margin-top:18px">
+        <label for="jsonColumn">原始 JSON 列</label>
+        <select id="jsonColumn"></select>
+        <div id="jsonHint" class="hint"></div>
+      </div>
+      <button id="parseBtn" disabled>拆分 JSON 并刷新列</button>
+
+      <div class="field" style="margin-top:18px">
+        <label for="scoreColumn">最终结果列（模型分）</label>
+        <select id="scoreColumn"></select>
+        <div class="hint">列名包含 prob 的字段会在导出的 Excel 中统一设置为 2 位小数格式。</div>
+      </div>
+      <div class="field">
+        <label for="truthColumn">正确结果列</label>
+        <select id="truthColumn"></select>
+      </div>
+      <div class="field">
+        <label for="positiveLabel">正例取值</label>
+        <input id="positiveLabel" type="text" placeholder="例如：target_a，或 target_a,target_b">
+        <div class="hint">支持逗号、中文逗号或换行分隔多个取值；留空则自动识别 1/是/true/命中。</div>
+      </div>
+      <div class="field">
+        <label>分数方向</label>
+        <div class="radio-row">
+          <label><input type="radio" name="direction" value="high" checked> 分越高越像正例</label>
+          <label><input type="radio" name="direction" value="low"> 分越低越像正例</label>
+        </div>
+      </div>
+      <button id="statsBtn" disabled>生成统计与 Excel</button>
+      <a id="download" class="download" href="#">下载处理结果</a>
+      <div id="message" class="status"></div>
+    </aside>
+
+    <section>
+      <div class="tabs">
+        <button class="tab active" data-view="preview">数据预览</button>
+        <button class="tab" data-view="bucket">分层分布</button>
+        <button class="tab" data-view="threshold">阈值准召</button>
+      </div>
+      <div class="content">
+        <div id="metrics" class="metrics" style="display:none"></div>
+        <div id="view"></div>
+      </div>
+    </section>
+  </main>
+  <footer>© 2026 Xueman. All rights reserved.</footer>
+
+  <script>
+    const state = {
+      fileId: "",
+      columns: [],
+      preview: [],
+      parsedColumns: [],
+      sheetNames: [],
+      stats: null,
+      activeView: "preview"
+    };
+
+    const $ = (id) => document.getElementById(id);
+
+    function showMessage(text, isError = false) {
+      const box = $("message");
+      box.textContent = text;
+      box.className = "status" + (isError ? " error" : "");
+      box.style.display = text ? "block" : "none";
+    }
+
+    function setOptions(select, columns, preferred = "") {
+      select.innerHTML = "";
+      columns.forEach((column) => {
+        const option = document.createElement("option");
+        option.value = column;
+        option.textContent = column;
+        select.appendChild(option);
+      });
+      if (preferred && columns.includes(preferred)) select.value = preferred;
+    }
+
+    function renderTable(rows, columns) {
+      if (!rows || !rows.length) return '<div class="empty">暂无数据</div>';
+      const cols = columns && columns.length ? columns : Object.keys(rows[0]);
+      const head = cols.map((c) => `<th>${escapeHtml(c)}</th>`).join("");
+      const body = rows.map((row) => {
+        return `<tr>${cols.map((c) => `<td>${formatCell(row[c])}</td>`).join("")}</tr>`;
+      }).join("");
+      return `<div class="table-wrap"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;");
+    }
+
+    function formatCell(value) {
+      if (value === null || value === undefined || Number.isNaN(value)) return "";
+      if (typeof value === "number") return Number.isInteger(value) ? String(value) : value.toFixed(4);
+      return escapeHtml(value);
+    }
+
+    function renderMetrics() {
+      const wrap = $("metrics");
+      if (!state.stats) {
+        wrap.style.display = "none";
+        return;
+      }
+      const s = state.stats.summary;
+      wrap.style.display = "grid";
+      wrap.innerHTML = `
+        <div class="metric"><span>有效样本</span><b>${s.total_valid ?? 0}</b></div>
+        <div class="metric"><span>正例样本</span><b>${s.total_positive ?? 0}</b></div>
+        <div class="metric"><span>模型分列</span><b style="font-size:15px">${escapeHtml(s.score_column ?? "")}</b></div>
+        <div class="metric"><span>正确结果列</span><b style="font-size:15px">${escapeHtml(s.truth_column ?? "")}</b></div>
+      `;
+    }
+
+    function renderView() {
+      renderMetrics();
+      let html = "";
+      if (state.activeView === "bucket") {
+        html = renderTable(state.stats?.bucket_stats || [], ["score_layer", "sample_count", "positive_count", "positive_rate", "recall_share"]);
+      } else if (state.activeView === "threshold") {
+        html = renderTable(state.stats?.threshold_stats || [], ["threshold", "predicted_positive", "true_positive", "false_positive", "false_negative", "precision", "recall", "f1"]);
+      } else {
+        html = renderTable(state.preview, state.columns.slice(0, 18));
+      }
+      $("view").innerHTML = html;
+    }
+
+    async function postForm(url, form) {
+      const response = await fetch(url, { method: "POST", body: form });
+      const data = await response.json();
+      if (!response.ok || data.error) throw new Error(data.error || "处理失败");
+      return data;
+    }
+
+    async function loadPreview(useSelectedSheet = false) {
+      const file = $("file").files[0];
+      if (!file && !state.fileId) return showMessage("请先选择 Excel 文件。", true);
+      showMessage("正在读取表格...");
+      const form = new FormData();
+      if (!useSelectedSheet || !state.fileId) {
+        form.append("file", file);
+      } else {
+        form.append("file_id", state.fileId);
+      }
+      if (useSelectedSheet && $("sheetName").value) form.append("sheet_name", $("sheetName").value);
+      try {
+        const data = await postForm("/api/preview", form);
+        state.fileId = data.file_id;
+        state.columns = data.columns;
+        state.preview = data.preview;
+        state.sheetNames = data.sheet_names || [];
+        state.stats = null;
+        setOptions($("sheetName"), state.sheetNames, data.selected_sheet);
+        $("sheetField").style.display = state.sheetNames.length > 1 ? "block" : "none";
+        setOptions($("jsonColumn"), data.columns, data.json_candidates?.[0]?.column);
+        setOptions($("scoreColumn"), data.columns);
+        setOptions($("truthColumn"), data.columns);
+        $("parseBtn").disabled = false;
+        $("statsBtn").disabled = true;
+        $("download").style.display = "none";
+        $("fileInfo").style.display = "block";
+        $("fileInfo").textContent = `已读取「${data.selected_sheet || "Sheet1"}」：${data.rows} 行，${data.columns.length} 列。`;
+        $("jsonHint").textContent = data.json_candidates?.length
+          ? `候选 JSON 列：${data.json_candidates.slice(0, 3).map(x => `${x.column}(${x.hits}/${x.sampled})`).join("，")}`
+          : "未自动识别到明显 JSON 列，请手动选择。";
+        showMessage("");
+        renderView();
+      } catch (error) {
+        showMessage(error.message, true);
+      }
+    }
+
+    $("previewBtn").addEventListener("click", async () => {
+      await loadPreview(false);
+    });
+
+    $("sheetName").addEventListener("change", async () => {
+      await loadPreview(true);
+    });
+
+    $("parseBtn").addEventListener("click", async () => {
+      if (!state.fileId) return;
+      showMessage("正在拆分 JSON...");
+      const form = new FormData();
+      form.append("file_id", state.fileId);
+      form.append("sheet_name", $("sheetName").value);
+      form.append("json_column", $("jsonColumn").value);
+      form.append("score_column", state.columns[0] || "");
+      form.append("truth_column", state.columns[0] || "");
+      try {
+        const data = await postForm("/api/process", form);
+        state.columns = data.columns;
+        state.preview = data.preview;
+        state.parsedColumns = data.parsed_columns;
+        state.stats = null;
+        const scorePreferred = state.columns.find(c => /prob/i.test(c)) || state.parsedColumns[0] || state.columns[0];
+        setOptions($("scoreColumn"), state.columns, scorePreferred);
+        setOptions($("truthColumn"), state.columns);
+        $("statsBtn").disabled = false;
+        $("download").style.display = "none";
+        showMessage(`已拆出 ${state.parsedColumns.length} 个 JSON 字段。请选择模型分列和正确结果列后生成统计。`);
+        renderView();
+      } catch (error) {
+        showMessage(error.message, true);
+      }
+    });
+
+    $("statsBtn").addEventListener("click", async () => {
+      showMessage("正在生成统计和下载文件...");
+      const form = new FormData();
+      form.append("file_id", state.fileId);
+      form.append("sheet_name", $("sheetName").value);
+      form.append("json_column", $("jsonColumn").value);
+      form.append("score_column", $("scoreColumn").value);
+      form.append("truth_column", $("truthColumn").value);
+      form.append("positive_label", $("positiveLabel").value);
+      form.append("direction", document.querySelector('input[name="direction"]:checked').value);
+      try {
+        const data = await postForm("/api/process", form);
+        state.columns = data.columns;
+        state.preview = data.preview;
+        state.parsedColumns = data.parsed_columns;
+        state.stats = data.stats;
+        $("download").href = data.download_url;
+        $("download").style.display = "block";
+        showMessage("已完成。可以在右侧查看统计，也可以下载 Excel 结果。");
+        state.activeView = "threshold";
+        document.querySelectorAll(".tab").forEach(t => t.classList.toggle("active", t.dataset.view === state.activeView));
+        renderView();
+      } catch (error) {
+        showMessage(error.message, true);
+      }
+    });
+
+    document.querySelectorAll(".tab").forEach((tab) => {
+      tab.addEventListener("click", () => {
+        state.activeView = tab.dataset.view;
+        document.querySelectorAll(".tab").forEach(t => t.classList.toggle("active", t === tab));
+        renderView();
+      });
+    });
+
+    renderView();
+  </script>
+</body>
+</html>
