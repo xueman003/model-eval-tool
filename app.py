@@ -21,6 +21,27 @@ EXCEL_CELL_CHAR_LIMIT = 32767
 TRUNCATED_SUFFIX = "\n...[内容过长，已截断]"
 
 
+def is_object_id_column(column):
+    text = str(column).strip().lower().replace("_", "").replace(" ", "")
+    return text in {"objectid", "对象id"} or text.endswith("objectid") or text.endswith("对象id")
+
+
+def stringify_identifier(value):
+    if value is None or pd.isna(value):
+        return None
+    if isinstance(value, bool):
+        return str(value)
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, float):
+        if math.isnan(value) or math.isinf(value):
+            return None
+        if value.is_integer():
+            return f"{value:.0f}"
+        return str(value)
+    return str(value).strip()
+
+
 def clean_cell(value):
     if pd.isna(value):
         return ""
@@ -48,7 +69,7 @@ def read_sheet(path, sheet_name=""):
     excel = pd.ExcelFile(path)
     sheet_names = excel.sheet_names
     selected = sheet_name if sheet_name in sheet_names else sheet_names[0]
-    return pd.read_excel(path, sheet_name=selected), sheet_names, selected
+    return pd.read_excel(path, sheet_name=selected, dtype=str), sheet_names, selected
 
 
 def parse_jsonish(raw):
@@ -99,23 +120,44 @@ def infer_json_columns(df):
 def flatten_json_column(df, json_column):
     parsed_rows = []
     all_keys = []
+    list_lengths = {}
     statuses = []
 
     for raw in df[json_column].tolist():
         parsed, status = parse_jsonish(raw)
         parsed_rows.append(parsed)
         statuses.append(status)
-        for key in parsed.keys():
+        for key, value in parsed.items():
             if key not in all_keys:
                 all_keys.append(key)
+            if isinstance(value, list):
+                list_lengths[key] = max(list_lengths.get(key, 0), len(value))
 
     result = df.copy()
+    output_keys = []
     for key in all_keys:
-        values = [row.get(key, None) for row in parsed_rows]
-        result[key] = values
+        if key in list_lengths:
+            for index in range(list_lengths[key]):
+                column_name = f"{key}_{index + 1}"
+                output_keys.append(column_name)
+                values = []
+                for row in parsed_rows:
+                    value = row.get(key, None)
+                    if isinstance(value, list):
+                        item = value[index] if index < len(value) else None
+                    else:
+                        item = value if index == 0 else None
+                    if isinstance(item, (dict, list)):
+                        item = json.dumps(item, ensure_ascii=False)
+                    values.append(item)
+                result[column_name] = values
+        else:
+            output_keys.append(key)
+            values = [row.get(key, None) for row in parsed_rows]
+            result[key] = values
 
     result["_json_parse_status"] = statuses
-    return result, all_keys
+    return result, output_keys
 
 
 def split_positive_labels(positive_label):
@@ -240,6 +282,14 @@ def format_prob_columns(df):
     return result
 
 
+def format_identifier_columns(df):
+    result = df.copy()
+    for column in result.columns:
+        if is_object_id_column(column):
+            result[column] = result[column].apply(stringify_identifier)
+    return result
+
+
 def protect_excel_text_limits(df):
     result = df.copy()
     truncated_columns_by_row = []
@@ -260,10 +310,49 @@ def protect_excel_text_limits(df):
     return result
 
 
+def prepare_detail_dataframe(df):
+    return protect_excel_text_limits(format_prob_columns(format_identifier_columns(df)))
+
+
+def apply_workbook_styles(workbook, detail_sheet_names=None):
+    detail_sheet_names = set(detail_sheet_names or [])
+    for sheet in workbook.worksheets:
+        sheet.freeze_panes = "A2"
+        for cell in sheet[1]:
+            cell.style = "Headline 4"
+        for column_cells in sheet.columns:
+            header = str(column_cells[0].value or "")
+            width = min(max(len(header) + 4, 10), 42)
+            sheet.column_dimensions[column_cells[0].column_letter].width = width
+
+    for sheet in workbook.worksheets:
+        for row in sheet.iter_rows():
+            for cell in row:
+                header = str(sheet.cell(row=1, column=cell.column).value or "")
+                normalized_header = header.lower()
+                if sheet.title in detail_sheet_names and is_object_id_column(header):
+                    if cell.row > 1 and cell.value is not None:
+                        cell.value = str(cell.value)
+                    cell.number_format = "@"
+                elif "prob" in normalized_header or normalized_header in {"precision", "recall", "f1", "positive_rate", "recall_share"}:
+                    cell.number_format = "0.00"
+
+
+def save_flat_workbook(df, file_id):
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    output_path = OUTPUT_DIR / f"model_eval_flattened_{file_id}.xlsx"
+    detail = prepare_detail_dataframe(df)
+
+    with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
+        detail.to_excel(writer, index=False, sheet_name="拆分明细")
+        apply_workbook_styles(writer.book, detail_sheet_names={"拆分明细"})
+    return output_path
+
+
 def save_workbook(df, stats, file_id):
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     output_path = OUTPUT_DIR / f"model_eval_result_{file_id}.xlsx"
-    detail = protect_excel_text_limits(format_prob_columns(df))
+    detail = prepare_detail_dataframe(df)
     bucket_df = pd.DataFrame(stats["bucket_stats"])
     threshold_df = pd.DataFrame(stats["threshold_stats"])
     summary_df = pd.DataFrame([stats["summary"]])
@@ -274,23 +363,7 @@ def save_workbook(df, stats, file_id):
         bucket_df.to_excel(writer, index=False, sheet_name="分层分布")
         threshold_df.to_excel(writer, index=False, sheet_name="阈值准召")
 
-        workbook = writer.book
-        for sheet in workbook.worksheets:
-            sheet.freeze_panes = "A2"
-            for cell in sheet[1]:
-                cell.style = "Headline 4"
-            for column_cells in sheet.columns:
-                header = str(column_cells[0].value or "")
-                width = min(max(len(header) + 4, 10), 42)
-                sheet.column_dimensions[column_cells[0].column_letter].width = width
-
-        for sheet_name in ["拆分明细", "分层分布", "阈值准召"]:
-            sheet = workbook[sheet_name]
-            for row in sheet.iter_rows():
-                for cell in row:
-                    header = str(sheet.cell(row=1, column=cell.column).value or "").lower()
-                    if "prob" in header or header in {"precision", "recall", "f1", "positive_rate", "recall_share"}:
-                        cell.number_format = "0.00"
+        apply_workbook_styles(writer.book, detail_sheet_names={"拆分明细"})
     return output_path
 
 
@@ -335,6 +408,9 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         if self.path == "/api/preview":
             self.handle_preview()
+            return
+        if self.path == "/api/flatten":
+            self.handle_flatten()
             return
         if self.path == "/api/process":
             self.handle_process()
@@ -400,6 +476,38 @@ class Handler(BaseHTTPRequestHandler):
                     "columns": columns,
                     "json_candidates": infer_json_columns(df),
                     "preview": preview,
+                }
+            )
+        except Exception as exc:
+            self.send_json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
+
+    def handle_flatten(self):
+        try:
+            form = self.read_multipart()
+            file_id = form.get("file_id")
+            sheet_name = form.get("sheet_name", "")
+            json_column = form.get("json_column")
+            if not all([file_id, json_column]):
+                raise ValueError("请先选择 JSON 列。")
+
+            path = UPLOAD_DIR / f"{file_id}.xlsx"
+            if not path.exists():
+                raise ValueError("上传文件已失效，请重新上传。")
+            df, sheet_names, selected_sheet = read_sheet(path, sheet_name)
+            if json_column not in df.columns:
+                raise ValueError("选择的 JSON 列不存在，请重新选择。")
+
+            flat_df, parsed_keys = flatten_json_column(df, json_column)
+            output = save_flat_workbook(flat_df, file_id)
+            preview = records_for_json(flat_df.head(MAX_PREVIEW_ROWS))
+            self.send_json(
+                {
+                    "parsed_columns": parsed_keys,
+                    "columns": [str(column) for column in flat_df.columns],
+                    "sheet_names": sheet_names,
+                    "selected_sheet": selected_sheet,
+                    "preview": preview,
+                    "download_url": f"/download/{output.name}",
                 }
             )
         except Exception as exc:

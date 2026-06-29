@@ -279,6 +279,7 @@
         </div>
       </div>
       <button id="statsBtn" disabled>生成统计与 Excel</button>
+      <a id="flatDownload" class="download" href="#">下载拆分明细</a>
       <a id="download" class="download" href="#">下载处理结果</a>
       <div id="message" class="status"></div>
     </aside>
@@ -413,6 +414,7 @@
         setOptions($("truthColumn"), data.columns);
         $("parseBtn").disabled = false;
         $("statsBtn").disabled = true;
+        $("flatDownload").style.display = "none";
         $("download").style.display = "none";
         $("fileInfo").style.display = "block";
         $("fileInfo").textContent = `已读取「${data.selected_sheet || "Sheet1"}」：${data.rows} 行，${data.columns.length} 列。`;
@@ -441,10 +443,8 @@
       form.append("file_id", state.fileId);
       form.append("sheet_name", $("sheetName").value);
       form.append("json_column", $("jsonColumn").value);
-      form.append("score_column", state.columns[0] || "");
-      form.append("truth_column", state.columns[0] || "");
       try {
-        const data = await postForm("/api/process", form);
+        const data = await postForm("/api/flatten", form);
         state.columns = data.columns;
         state.preview = data.preview;
         state.parsedColumns = data.parsed_columns;
@@ -453,8 +453,12 @@
         setOptions($("scoreColumn"), state.columns, scorePreferred);
         setOptions($("truthColumn"), state.columns);
         $("statsBtn").disabled = false;
+        $("flatDownload").href = data.download_url;
+        $("flatDownload").style.display = "block";
         $("download").style.display = "none";
-        showMessage(`已拆出 ${state.parsedColumns.length} 个 JSON 字段。请选择模型分列和正确结果列后生成统计。`);
+        showMessage(`已拆出 ${state.parsedColumns.length} 个 JSON 字段。可以直接下载拆分明细，或继续选择模型分列和正确结果列生成统计。`);
+        state.activeView = "preview";
+        document.querySelectorAll(".tab").forEach(t => t.classList.toggle("active", t.dataset.view === state.activeView));
         renderView();
       } catch (error) {
         showMessage(error.message, true);
